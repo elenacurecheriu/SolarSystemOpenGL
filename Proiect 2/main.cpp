@@ -1,11 +1,10 @@
-﻿
-//   - transformarile de modelare si cea de vizualizare sunt inglobate intr-o singura matrice;
+﻿//   - transformarile de modelare si cea de vizualizare sunt inglobate intr-o singura matrice;
 //	 - folosirea stivelor de matrice;
 //   - generare procedurala sfera;
 
 // instanciated rendering pentru asteroizi
 
-#include <windows.h>        //	Utilizarea functiilor de sistem Windows (crearea de ferestre, manipularea fisierelor si directoarelor);
+#include <windows.h>        //	Utilizarea functiilor de sistem Windows (crearea de ferite, manipularea fisierelor si directoarelor);
 #include <stdlib.h>         //  Biblioteci necesare pentru citirea shaderelor;
 #include <stdio.h>
 #include <math.h>           //  Adaugat pentru functii trigonometrice (sin, cos)
@@ -16,18 +15,22 @@
 #include "glm/gtc/matrix_transform.hpp"
 #include "glm/gtx/transform.hpp"
 #include "glm/gtc/type_ptr.hpp"
-#include<stack>
+#include <stack>
+#include "SOIL.h"
 
 
 GLuint
-VaoId,
-VboId,
-EboId,
-ProgramId,
-viewModelLocation,
-projLocation,
-codColLocation,
-objectTypeLocation; // Locatie uniforma noua
+	VaoId,
+	VboId,
+	EboId,
+	ProgramId,
+	viewModelLocation,
+	projLocation,
+	codColLocation,
+	objectTypeLocation, // Locatie uniforma noua
+	textureLocation, // Locatia uniformei "myTexture"
+	textureEarthId,
+	textureMoonId;
 
 float PI = 3.141592;
 
@@ -112,6 +115,45 @@ void ProcessSpecialKeys(int key, int xx, int yy)
 	}
 }
 
+//Texturare Luna + Pamant
+GLuint LoadTexture(const char* imagePath)
+{
+	GLuint textureId;
+
+	// 1. Generarea identificatorului [cite: 84]
+	glGenTextures(1, &textureId);
+
+	// 2. Legarea texturii [cite: 94]
+	glBindTexture(GL_TEXTURE_2D, textureId);
+
+	// 3. Setarea parametrilor de wrapping si filtrare [cite: 150, 203]
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	// 4. Incarcarea imaginii folosind SOIL 
+	int width, height, channels;
+	unsigned char* image = SOIL_load_image(imagePath, &width, &height, &channels, SOIL_LOAD_RGB);
+
+	if (image)
+	{
+		// 5. Generarea texturii efective 
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, image);
+		glGenerateMipmap(GL_TEXTURE_2D);
+		SOIL_free_image_data(image); // Eliberare memorie RAM
+	}
+	else
+	{
+		printf("Eroare la incarcarea texturii: %s\n", imagePath);
+	}
+
+	// Dezlegare textura
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	return textureId;
+}
+
 //  Crearea si compilarea obiectelor de tip shader;
 void CreateShaders(void)
 {
@@ -125,6 +167,7 @@ void CreateVBO(void)
 	// generare procedurala pentru sfera
 	glm::vec4 Vertices[NR_VF];
 	glm::vec3 Colors[NR_VF];
+	glm::vec2 TexCoords[NR_VF]; //adaugat pentru texturi
 	GLushort Indices[6 * NR_VF]; // Buffer suficient pentru indici
 
 	int index;
@@ -143,6 +186,12 @@ void CreateVBO(void)
 			Vertices[index] = glm::vec4(x_vf, y_vf, z_vf, 1.0);
 			// Culoare variabila per varf (pentru cerinta ii)
 			Colors[index] = glm::vec3(0.5f + 0.5 * sinf(u), 0.5f + 0.5 * cosf(v), 0.5f + 0.5 * sinf(u + v));
+		
+			// ADAGUARE: Calcul coordonate texturare (s, t) intre 0 si 1 [cite: 239]
+			// Mapam paralele si meridianele pe patratul [0,1]x[0,1]
+			float tex_s = (float)merid / NR_MERID; // sau parr, depinde de orientarea imaginii
+			float tex_t = (float)parr / NR_PARR;
+			TexCoords[index] = glm::vec2(tex_s, tex_t);
 		}
 	}
 
@@ -165,30 +214,36 @@ void CreateVBO(void)
 
 	//  Transmiterea datelor prin buffere;
 
-	//  Se creeaza / se leaga un VAO (Vertex Array Object) - util cand se utilizeaza mai multe VBO;
-	glGenVertexArrays(1, &VaoId);                                                   //  Generarea VAO si indexarea acestuia catre variabila VaoId;
+	glGenVertexArrays(1, &VaoId);
 	glBindVertexArray(VaoId);
 
-	//  Se creeaza un buffer pentru VARFURI - COORDONATE si CULORI;
-	glGenBuffers(1, &VboId);														//  Generarea bufferului si indexarea acestuia catre variabila VboId;
-	glBindBuffer(GL_ARRAY_BUFFER, VboId);											//  Setarea tipului de buffer - atributele varfurilor;
-	//  Alocam spatiu pentru varfuri si culori
-	glBufferData(GL_ARRAY_BUFFER, sizeof(Vertices) + sizeof(Colors), NULL, GL_STATIC_DRAW);
+	glGenBuffers(1, &VboId);
+	glBindBuffer(GL_ARRAY_BUFFER, VboId);
+
+	// ADAGUARE: Alocam memorie si pentru TexCoords
+	// Ordine in buffer: Vertices | Colors | TexCoords
+	glBufferData(GL_ARRAY_BUFFER, sizeof(Vertices) + sizeof(Colors) + sizeof(TexCoords), NULL, GL_STATIC_DRAW);
+
 	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(Vertices), Vertices);
 	glBufferSubData(GL_ARRAY_BUFFER, sizeof(Vertices), sizeof(Colors), Colors);
+	glBufferSubData(GL_ARRAY_BUFFER, sizeof(Vertices) + sizeof(Colors), sizeof(TexCoords), TexCoords); // Incarcam datele de textura
 
-	//	Se creeaza un buffer pentru INDICI;
-	glGenBuffers(1, &EboId);														//  Generarea bufferului si indexarea acestuia catre variabila EboId;
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EboId);									//  Setarea tipului de buffer - atributele varfurilor;
+	glGenBuffers(1, &EboId);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EboId);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(Indices), Indices, GL_STATIC_DRAW);
 
-	//	Se activeaza lucrul cu atribute;
-	//  Se asociaza atributul (0 = coordonate) pentru shader;
+	// Atribut 0: Pozitie
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, (GLvoid*)0);
-	//  Se asociaza atributul (1 =  culoare) pentru shader;
+
+	// Atribut 1: Culoare
 	glEnableVertexAttribArray(1);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*)sizeof(Vertices));
+
+	// ADAGUARE: Atribut 2: Coordonate Texturare 
+	glEnableVertexAttribArray(2);
+	// Offset-ul este dimensiunea Vertices + dimensiunea Colors
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, (GLvoid*)(sizeof(Vertices) + sizeof(Colors)));
 }
 
 //  Elimina obiectele de tip shader dupa rulare;
@@ -201,6 +256,7 @@ void DestroyShaders(void)
 void DestroyVBO(void)
 {
 	//  Eliberarea atributelor din shadere (pozitie, culoare, texturare etc.);
+	glDisableVertexAttribArray(2);
 	glDisableVertexAttribArray(1);
 	glDisableVertexAttribArray(0);
 
@@ -234,6 +290,14 @@ void Initialize(void)
 	codColLocation = glGetUniformLocation(ProgramId, "codCol");
 	objectTypeLocation = glGetUniformLocation(ProgramId, "objectType");
 
+	//Incarcare texturi
+	// Locatia sampler-ului din fragment shader
+	textureLocation = glGetUniformLocation(ProgramId, "myTexture");
+
+	// ADAGUARE: Incarcarea texturilor
+	textureEarthId = LoadTexture("earth_map.jpg"); // Placeholder
+	textureMoonId = LoadTexture("moon_map.jpg");   // Placeholder
+
 	//	Realizarea proiectiei - pot fi utilizate si alte variante;
 	// projection = glm::ortho(xMin, xMax, yMin, yMax, zNear, zFar);
 	//	projection = glm::frustum(xMin, xMax, yMin, yMax, zNear, zFar);
@@ -266,8 +330,8 @@ void RenderFunction(void)
 	// Intregul sistem se deplaseaza prin translatie
 	translateSystem = glm::translate(glm::mat4(1.0f), glm::vec3(0.0, 0.0, 0.0));
 
-	// Soarele se roteste in jurul propriei axe
-	rotateSun = glm::rotate(glm::mat4(1.0f), -(float)0.0005 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
+	// Soarele nu se roteste
+	rotateSun = glm::mat4(1.0f);
 
 	// Planeta se obtine scaland sfera initiala
 	scalePlanet = glm::scale(glm::mat4(1.0f), glm::vec3(0.5, 0.5, 0.5));
@@ -294,79 +358,52 @@ void RenderFunction(void)
 	mvStack.top() *= translateSystem;	 // In varful stivei:  view * translateSystem 
 	mvStack.push(mvStack.top());         // Pe poz 2 a stivei: view * translateSystem 
 
-	// 1) Pentru Soare (astrul central)
-
-	// Actualizare a matricei din varful stivei
-	// Rotatie in jurul axei proprii
-	mvStack.top() *= rotateSun;         // In varful stivei:  view * translateSystem * rotateSun          
-
-	// Transmitere matrice catre shader
+	// --- 1. SOARELE (Fara textura, doar culoare) ---
+	mvStack.top() *= rotateSun;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
-	// Setam tipul obiectului = 1 (Soare)
 	glUniform1i(objectTypeLocation, 1);
 
-	//	Desenarea Soarelui (Sfera procedurala)
-	codCol = 0;
-	glUniform1i(codColLocation, codCol);
+	// Dezlegam orice textura pentru siguranta (sau folosim textura 0)
+	glBindTexture(GL_TEXTURE_2D, 0);
+
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
+	mvStack.pop();
 
-	// Eliminare Soare din varf stiva
-	mvStack.pop();		                 // In varful stivei:   view * translateSystem 
+	// --- 2. PLANETA (Pamant - Cu Textura) ---
+	mvStack.top() *= rotatePlanet;
+	mvStack.top() *= translatePlanet;
+	mvStack.push(mvStack.top());
 
-
-	// 2) Pentru planeta
-
-	// Actualizare a matricei din varful stivei
-	// Rotatie in jurul Soarelui
-	mvStack.top() *= rotatePlanet;		// In varful stivei:  view * translateSystem * rPl
-	// Deplasare fata de centrul Soarelui
-	mvStack.top() *= translatePlanet;   // In varful stivei:  view * translateSystem * rPl * tPl
-
-	// -- Aici suntem la pozitia Planetei. Salvam matricea pentru Satelit --
-	mvStack.push(mvStack.top());        // Stiva: ... PlanetCenter, PlanetCenter
-
-	// Rotatie in jurul axei proprii a Planetei
 	mvStack.top() *= rotatePlanetAxis;
-	// Scalare (redimensionare obiect 3D)
 	mvStack.top() *= scalePlanet;
-
-	// Transmitere matrice
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
-	glUniform1i(objectTypeLocation, 2); // 2 = Planeta
+	glUniform1i(objectTypeLocation, 2);
 
-	//	Desenarea Planetei
+	// ADAGUARE: Activare si Legare Textura Pamant [cite: 209]
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, textureEarthId);
+	glUniform1i(textureLocation, 0); // Trimitem indexul unitatii de textura (0)
+
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
+	mvStack.pop();
 
-	// Scoatem matricea de desenare a Planetei, revenim la Centrul Planetei
-	mvStack.pop();                      // Stiva: ... PlanetCenter
-
-	// 3) Pentru Satelit
-
-	// Rotatie in jurul Planetei
+	// --- 3. SATELIT (Luna - Cu Textura) ---
 	mvStack.top() *= rotateSat;
-	// Deplasare fata de Planeta
 	mvStack.top() *= translateSat;
-	// Scalare Satelit
 	mvStack.top() *= scaleSat;
-
-	// Transmitere matrice
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
-	glUniform1i(objectTypeLocation, 3); // 3 = Satelit
+	glUniform1i(objectTypeLocation, 3);
 
-	// Desenarea Satelitului
+	// ADAGUARE: Activare si Legare Textura Luna
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, textureMoonId);
+	glUniform1i(textureLocation, 0);
+
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
+	mvStack.pop();
 
-	// Scoatem matricea Satelitului
-	// Aceasta este ultima matrice ramasa in stiva pentru acest frame (cea derivata din PlanetCenter), 
-	// deci dupa acest pop stiva este goala.
-	mvStack.pop(); // Stiva: goala.
-
-	// Aici s-a oprit secventa de pops. 
-	// Nu mai este nevoie de alt pop pentru ca am consumat matricea sistemului 
-	// prin transformarile planetei (modificand top() direct).
-
-	glutSwapBuffers();	//	Inlocuieste imaginea deseneata in fereastra cu cea randata; 
-	glFlush();			//  Asigura rularea tuturor comenzilor OpenGL apelate anterior;
+	glutSwapBuffers();
+	glFlush();
 }
 
 //	Punctul de intrare in program, se ruleaza rutina OpenGL;
