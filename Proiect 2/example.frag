@@ -27,6 +27,46 @@ void main()
             // Functia texture() combina sampler-ul cu coordonatele
             out_Color = texture(myTexture, ex_TexCoord);
         }
+        // 4 = Mercur (Gri/Maro)
+        else if (objectType == 4)
+        {
+            out_Color = vec4(0.7, 0.6, 0.5, 1.0);
+        }
+        // 5 = Venus (Galbui)
+        else if (objectType == 5)
+        {
+            out_Color = vec4(0.9, 0.85, 0.7, 1.0);
+        }
+        // 6 = Mars (Rosu)
+        else if (objectType == 6)
+        {
+            out_Color = vec4(0.8, 0.3, 0.2, 1.0);
+        }
+        // 7 = Jupiter (Portocaliu/Bej)
+        else if (objectType == 7)
+        {
+            out_Color = vec4(0.8, 0.6, 0.4, 1.0);
+        }
+        // 8 = Saturn (Galben pal)
+        else if (objectType == 8)
+        {
+            out_Color = vec4(0.9, 0.8, 0.5, 1.0);
+        }
+        // 9 = Uranus (Cyan)
+        else if (objectType == 9)
+        {
+            out_Color = vec4(0.5, 0.8, 0.9, 1.0);
+        }
+        // 10 = Neptune (Albastru)
+        else if (objectType == 10)
+        {
+            out_Color = vec4(0.2, 0.3, 0.8, 1.0);
+        }
+        // 11 = Pluto (Maro deschis/Gri)
+        else if (objectType == 11)
+        {
+            out_Color = vec4(0.6, 0.5, 0.5, 1.0);
+        }
         else
         {
             out_Color = vec4(ex_Color, 1.0);
