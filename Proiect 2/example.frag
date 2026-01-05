@@ -1,79 +1,112 @@
 #version 330 core
 
 in vec3 ex_Color;
-// ADAGUARE: Coordonatele interpolate
-in vec2 ex_TexCoord; 
+in vec2 ex_TexCoord;
+// Variabile din shader-ul de varfuri
+in vec3 ex_Normal;
+in vec3 ex_FragPos;
 
 out vec4 out_Color;
 
 uniform int codCol;
 uniform int objectType;
-
-// ADAGUARE: Variabila uniforma pentru textura
-uniform sampler2D myTexture; 
+uniform sampler2D myTexture;
+uniform vec3 lightPos; //Pozitia soarelui
 
 void main()
 {
-    if (codCol == 0) // Randare normala
+    vec4 baseColor;
+
+    if (codCol == 0) 
     {
-        // 1 = Soare (pastram culoarea procedurala sau punem o textura de Soare daca vrei)
         if (objectType == 1) 
         {
-             out_Color = vec4(1.0, 0.9, 0.2, 1.0);
+             baseColor = vec4(1.0, 0.9, 0.2, 1.0);
         }
-        // 2 = Pamant, 3 = Luna -> APLICAM TEXTURA
         else if (objectType == 2 || objectType == 3) 
         {
-            // Functia texture() combina sampler-ul cu coordonatele
-            out_Color = texture(myTexture, ex_TexCoord);
+            baseColor = texture(myTexture, ex_TexCoord);
         }
-        // 4 = Mercur (Gri/Maro)
         else if (objectType == 4)
         {
-            out_Color = vec4(0.7, 0.6, 0.5, 1.0);
+            baseColor = vec4(0.7, 0.6, 0.5, 1.0);
         }
-        // 5 = Venus (Galbui)
         else if (objectType == 5)
         {
-            out_Color = vec4(0.9, 0.85, 0.7, 1.0);
+            baseColor = vec4(0.9, 0.85, 0.7, 1.0);
         }
-        // 6 = Mars (Rosu)
         else if (objectType == 6)
         {
-            out_Color = vec4(0.8, 0.3, 0.2, 1.0);
+            baseColor = vec4(0.8, 0.3, 0.2, 1.0);
         }
-        // 7 = Jupiter (Portocaliu/Bej)
         else if (objectType == 7)
         {
-            out_Color = vec4(0.8, 0.6, 0.4, 1.0);
+            baseColor = vec4(0.8, 0.6, 0.4, 1.0);
         }
-        // 8 = Saturn (Galben pal)
         else if (objectType == 8)
         {
-            out_Color = vec4(0.9, 0.8, 0.5, 1.0);
+            baseColor = vec4(0.9, 0.8, 0.5, 1.0);
         }
-        // 9 = Uranus (Cyan)
         else if (objectType == 9)
         {
-            out_Color = vec4(0.5, 0.8, 0.9, 1.0);
+            baseColor = vec4(0.5, 0.8, 0.9, 1.0);
         }
-        // 10 = Neptune (Albastru)
         else if (objectType == 10)
         {
-            out_Color = vec4(0.2, 0.3, 0.8, 1.0);
+            baseColor = vec4(0.2, 0.3, 0.8, 1.0);
         }
-        // 11 = Pluto (Maro deschis/Gri)
         else if (objectType == 11)
         {
-            out_Color = vec4(0.6, 0.5, 0.5, 1.0);
+            baseColor = vec4(0.6, 0.5, 0.5, 1.0);
         }
         else
         {
-            out_Color = vec4(ex_Color, 1.0);
+            baseColor = vec4(ex_Color, 1.0);
         }
     }
-    else // Randare solida (pentru debug etc.)
+    else 
     {
-        out_Color = vec4(1.0, 1.0, 1.0, 1.0); 
+        baseColor = vec4(1.0, 1.0, 1.0, 1.0);
     }
+
+    
+    // Soarele emite lumina, nu are umbra
+    if (objectType == 1 || codCol != 0)
+    {
+        out_Color = baseColor;
+        return;
+    }
+
+    // implementare formule curs 10 
+
+    // proprietati lumina
+    vec3 lightColor = vec3(1.0, 1.0, 1.0);
+    float ambientStrength = 0.15;
+    float specularStrength = 0.5;
+    float shininess = 32.0;
+
+    vec3 N = normalize(ex_Normal);
+    vec3 L = normalize(lightPos - ex_FragPos); // vector spre sursa de lumina
+    vec3 V = normalize(-ex_FragPos); // vector spre observator
+
+    vec3 ambient = ambientStrength * lightColor;
+
+    float diff = max(dot(N, L), 0.0);
+    vec3 diffuse = diff * lightColor;
+
+    vec3 R = reflect(-L, N);
+    float spec = pow(max(dot(V, R), 0.0), shininess);
+    vec3 specular = specularStrength * spec * lightColor;
+
+    // atenuare (lumina scade cu distanta)
+    float d = length(lightPos - ex_FragPos);
+    float attenuation = 1.0 / (1.0 + 0.0002 * d + 0.000001 * d * d);
+
+    ambient *= attenuation;
+    diffuse *= attenuation;
+    specular *= attenuation;
+
+    // sa se faca lumina
+    vec3 result = (ambient + diffuse + specular) * baseColor.rgb;
+    out_Color = vec4(result, baseColor.a);
 }

@@ -3,20 +3,18 @@
 //   - generare procedurala sfera;
 
 // TODO !! instanciated rendering pentru asteroizi (centura de asteroizi intre Marte si Jupiter?)
-// soarele sa fie mai mare si sa emita lumina, umbre
-// adaugare in shader iluminare Phong
 // adaugare in shader texturare pentru toate planetele
 // !!complex: inelele lui Saturn, folosire blending pentru a le face transparente
 // cuaternioni pentru rotatii
 // sa se vada orbita planetelor (cercuri in planul xy)
-// fundal cu stele
+// fundal cu stele pentru a da impresia de spatiu infinit + LUMINA DE LA STELE; instantiated rendering pentru stele
 // !! complex: gravitatie, miscarea planetelor nu este "hardcoded", ci rezultatul fortei de gravitatie
 // atmosfera pamantului (efect de glow) (atmospheric scattering)
 // efect de lens flare pentru soare
 // normal/bump mapping pentru planete
 // !! complex: sistem de particule (comete, explozii pe soare)
 // post processing (bloom, motion blur)
-// fundal stelat (skybox) pentru a da impresia de spatiu infinit
+
 
 
 #include <windows.h>        //	Utilizarea functiilor de sistem Windows (crearea de ferite, manipularea fisierelor si directoarelor);
@@ -45,7 +43,9 @@ GLuint
 	objectTypeLocation, // Locatie uniforma noua
 	textureLocation, // Locatia uniformei "myTexture"
 	textureEarthId,
-	textureMoonId;
+	textureMoonId,
+	lightPosLocation
+	;
 
 float PI = 3.141592;
 
@@ -67,7 +67,7 @@ int codCol;
 float timeElapsed;
 
 //	Elemente pentru matricea de vizualizare;
-float obsX = 0.0, obsY = 0.0, obsZ = 1500.f, // distanta marita pentru a vedea tot sistemul
+float obsX = 0.0, obsY = 0.0, obsZ = 3000.f, // distanta marita pentru a vedea tot sistemul
 refX = 0.0f, refY = 0.0f, refZ = -100.f,
 vX = 0.0;
 //	Elemente pentru matricea de proiectie;
@@ -83,7 +83,7 @@ obs, pctRef, vert;
 glm::mat4
 view, projection,
 translateSystem,
-rotateSun,
+rotateSun, scaleSun,
 scalePlanet, rotatePlanetAxis, rotatePlanet, translatePlanet,
 scaleSat, rotateSat, translateSat,
 scaleMercury, rotateMercury, translateMercury,
@@ -183,6 +183,7 @@ void CreateVBO(void)
 	// generare procedurala pentru sfera
 	glm::vec4 Vertices[NR_VF];
 	glm::vec3 Colors[NR_VF];
+	glm::vec3 Normals[NR_VF];
 	glm::vec2 TexCoords[NR_VF]; //adaugat pentru texturi
 	GLushort Indices[6 * NR_VF]; // Buffer suficient pentru indici
 
@@ -202,8 +203,11 @@ void CreateVBO(void)
 			Vertices[index] = glm::vec4(x_vf, y_vf, z_vf, 1.0);
 			// Culoare variabila per varf (pentru cerinta ii)
 			Colors[index] = glm::vec3(0.5f + 0.5 * sinf(u), 0.5f + 0.5 * cosf(v), 0.5f + 0.5 * sinf(u + v));
-		
-			// ADAGUARE: Calcul coordonate texturare (s, t) intre 0 si 1
+			
+			// calcul normale
+			
+			Normals[index] = glm::normalize(glm::vec3(x_vf, y_vf, z_vf));
+			// Calcul coordonate texturare (s, t) intre 0 si 1
 			// Mapam paralele si meridianele pe patratul [0,1]x[0,1]
 			float tex_s = (float)merid / NR_MERID; // sau parr, depinde de orientarea imaginii
 			float tex_t = (float)parr / NR_PARR;
@@ -236,13 +240,13 @@ void CreateVBO(void)
 	glGenBuffers(1, &VboId);
 	glBindBuffer(GL_ARRAY_BUFFER, VboId);
 
-	// Alocam memorie si pentru TexCoords
-	// Ordine in buffer: Vertices | Colors | TexCoords
-	glBufferData(GL_ARRAY_BUFFER, sizeof(Vertices) + sizeof(Colors) + sizeof(TexCoords), NULL, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(Vertices) + sizeof(Colors) + sizeof(TexCoords) + sizeof(Normals), NULL, GL_STATIC_DRAW);
 
 	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(Vertices), Vertices);
 	glBufferSubData(GL_ARRAY_BUFFER, sizeof(Vertices), sizeof(Colors), Colors);
-	glBufferSubData(GL_ARRAY_BUFFER, sizeof(Vertices) + sizeof(Colors), sizeof(TexCoords), TexCoords); // Incarcam datele de textura
+	glBufferSubData(GL_ARRAY_BUFFER, sizeof(Vertices) + sizeof(Colors), sizeof(TexCoords), TexCoords);
+	// Adaugam normalele la final
+	glBufferSubData(GL_ARRAY_BUFFER, sizeof(Vertices) + sizeof(Colors) + sizeof(TexCoords), sizeof(Normals), Normals);
 
 	glGenBuffers(1, &EboId);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EboId);
@@ -256,10 +260,13 @@ void CreateVBO(void)
 	glEnableVertexAttribArray(1);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*)sizeof(Vertices));
 
-	// Atribut 2: Coordonate Texturare 
+	// Atribut 2: Coordonate Texturare
 	glEnableVertexAttribArray(2);
-	// Offset-ul este dimensiunea Vertices + dimensiunea Colors
 	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, (GLvoid*)(sizeof(Vertices) + sizeof(Colors)));
+
+	// Atribut 3: Normale
+	glEnableVertexAttribArray(3);
+	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*)(sizeof(Vertices) + sizeof(Colors) + sizeof(TexCoords)));
 }
 
 //  Elimina obiectele de tip shader dupa rulare;
@@ -309,9 +316,12 @@ void Initialize(void)
 	//Incarcare texturi
 	// Locatia sampler-ului din fragment shader
 	textureLocation = glGetUniformLocation(ProgramId, "myTexture");
+	// Locatia pozitiei sursei de lumina
+	lightPosLocation = glGetUniformLocation(ProgramId, "lightPos");
 
 	textureEarthId = LoadTexture("earth_map.jpg"); // Placeholder
 	textureMoonId = LoadTexture("moon_map.jpg");   // Placeholder
+	
 
 	//	Realizarea proiectiei - pot fi utilizate si alte variante;
 	/* projection = glm::ortho(xMin, xMax, yMin, yMax, zNear, zFar);*/
@@ -340,13 +350,19 @@ void RenderFunction(void)
 	vert = glm::vec3(vX, 1.0f, 0.0f);
 	view = glm::lookAt(obs, pctRef, vert);
 
+	// Trimitem pozitia Soarelui catre shader
+	// Soarele este in (0,0,0) in World Space. Transformam in View Space.
+
+	glm::vec4 lightPosView = view * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+	glUniform3f(lightPosLocation, lightPosView.x, lightPosView.y, lightPosView.z);
+
 	// Matrice pentru miscarea obiectelor din sistem
-	// 
 	// Intregul sistem se deplaseaza prin translatie
 	translateSystem = glm::translate(glm::mat4(1.0f), glm::vec3(0.0, 0.0, 0.0));
 
 	// Soarele nu se roteste
 	rotateSun = glm::mat4(1.0f);
+	scaleSun = glm::scale(glm::mat4(1.0f), glm::vec3(4.0f, 4.0f, 4.0f));
 	
 	
 	// Pamantul se obtine scaland sfera initiala
@@ -355,48 +371,48 @@ void RenderFunction(void)
 	rotatePlanetAxis = glm::rotate(glm::mat4(1.0f), (float)0.001 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
 	// se roteste in jurul astrului central
 	rotatePlanet = glm::rotate(glm::mat4(1.0f), (float)0.0005 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
-	// este translatata in raport cu Soarele
-	translatePlanet = glm::translate(glm::mat4(1.0f), glm::vec3(250.0, 0.0, 0.0));
+	// este translatat in raport cu Soarele
+	translatePlanet = glm::translate(glm::mat4(1.0f), glm::vec3(600.0, 0.0, 0.0));
 
 	// Mercur
 	scaleMercury = glm::scale(glm::mat4(1.0f), glm::vec3(0.2f, 0.2f, 0.2f));
 	rotateMercury = glm::rotate(glm::mat4(1.0f), (float)0.002 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
-	translateMercury = glm::translate(glm::mat4(1.0f), glm::vec3(100.0, 0.0, 0.0));
+	translateMercury = glm::translate(glm::mat4(1.0f), glm::vec3(300.0, 0.0, 0.0));
 
 	// Venus
 	scaleVenus = glm::scale(glm::mat4(1.0f), glm::vec3(0.45f, 0.45f, 0.45f));
 	rotateVenus = glm::rotate(glm::mat4(1.0f), (float)0.0008 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
-	translateVenus = glm::translate(glm::mat4(1.0f), glm::vec3(180.0, 0.0, 0.0));
+	translateVenus = glm::translate(glm::mat4(1.0f), glm::vec3(450.0, 0.0, 0.0));
 
 	// Marte
 	scaleMars = glm::scale(glm::mat4(1.0f), glm::vec3(0.35f, 0.35f, 0.35f));
 	rotateMars = glm::rotate(glm::mat4(1.0f), (float)0.0004 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
-	translateMars = glm::translate(glm::mat4(1.0f), glm::vec3(320.0, 0.0, 0.0));
+	translateMars = glm::translate(glm::mat4(1.0f), glm::vec3(750.0, 0.0, 0.0));
 
 	// Jupiter
 	scaleJupiter = glm::scale(glm::mat4(1.0f), glm::vec3(1.2f, 1.2f, 1.2f));
 	rotateJupiter = glm::rotate(glm::mat4(1.0f), (float)0.0002 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
-	translateJupiter = glm::translate(glm::mat4(1.0f), glm::vec3(450.0, 0.0, 0.0));
+	translateJupiter = glm::translate(glm::mat4(1.0f), glm::vec3(1100.0, 0.0, 0.0));
 
 	// Saturn
 	scaleSaturn = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, 1.0f));
 	rotateSaturn = glm::rotate(glm::mat4(1.0f), (float)0.00015 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
-	translateSaturn = glm::translate(glm::mat4(1.0f), glm::vec3(600.0, 0.0, 0.0));
+	translateSaturn = glm::translate(glm::mat4(1.0f), glm::vec3(1400.0, 0.0, 0.0));
 
 	// Uranus
 	scaleUranus = glm::scale(glm::mat4(1.0f), glm::vec3(0.8f, 0.8f, 0.8f));
 	rotateUranus = glm::rotate(glm::mat4(1.0f), (float)0.0001 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
-	translateUranus = glm::translate(glm::mat4(1.0f), glm::vec3(750.0, 0.0, 0.0));
+	translateUranus = glm::translate(glm::mat4(1.0f), glm::vec3(1700.0, 0.0, 0.0));
 
 	// Neptun
 	scaleNeptune = glm::scale(glm::mat4(1.0f), glm::vec3(0.8f, 0.8f, 0.8f));
 	rotateNeptune = glm::rotate(glm::mat4(1.0f), (float)0.00008 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
-	translateNeptune = glm::translate(glm::mat4(1.0f), glm::vec3(900.0, 0.0, 0.0));
+	translateNeptune = glm::translate(glm::mat4(1.0f), glm::vec3(2000.0, 0.0, 0.0));
 
 	// Pluto
 	scalePluto = glm::scale(glm::mat4(1.0f), glm::vec3(0.15f, 0.15f, 0.15f));
 	rotatePluto = glm::rotate(glm::mat4(1.0f), (float)0.00005 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
-	translatePluto = glm::translate(glm::mat4(1.0f), glm::vec3(1000.0, 0.0, 0.0));
+	translatePluto = glm::translate(glm::mat4(1.0f), glm::vec3(2200.0, 0.0, 0.0));
 
 	// Luna: rotatie in jurul planetei, translatie mica, scalare mare
 	rotateSat = glm::rotate(glm::mat4(1.0f), (float)0.003 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
@@ -414,8 +430,9 @@ void RenderFunction(void)
 	mvStack.top() *= translateSystem;	 // In varful stivei:  view * translateSystem 
 	mvStack.push(mvStack.top());         // Pe poz 2 a stivei: view * translateSystem 
 
-	// --- 1. SOARELE (Fara textura, doar culoare) ---
+	// Soare
 	mvStack.top() *= rotateSun;
+	mvStack.top() *= scaleSun;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
 	glUniform1i(objectTypeLocation, 1);
 
