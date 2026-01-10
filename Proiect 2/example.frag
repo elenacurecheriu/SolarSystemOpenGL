@@ -59,6 +59,10 @@ void main()
         {
             baseColor = vec4(0.6, 0.5, 0.5, 1.0);
         }
+        else if (objectType == 12) // Orbita
+        {
+             baseColor = vec4(1.0, 1.0, 1.0, 1.0); // Alb
+        }
         else
         {
             baseColor = vec4(ex_Color, 1.0);
@@ -71,7 +75,7 @@ void main()
 
     
     // Soarele emite lumina, nu are umbra
-    if (objectType == 1 || codCol != 0)
+    if (objectType == 1 || objectType == 12 || codCol != 0)
     {
         out_Color = baseColor;
         return;

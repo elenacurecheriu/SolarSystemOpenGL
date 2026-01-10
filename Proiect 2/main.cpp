@@ -2,12 +2,10 @@
 //	 - folosirea stivelor de matrice;
 //   - generare procedurala sfera;
 
-// TODO !! instanciated rendering pentru asteroizi (centura de asteroizi intre Marte si Jupiter?)
+// TODO !! instanciated rendering pentru asteroizi (centura de asteroizi intre Marte si Jupiter?) 
 // adaugare in shader texturare pentru toate planetele
-// !!complex: inelele lui Saturn, folosire blending pentru a le face transparente
-// cuaternioni pentru rotatii
+// !!complex?: inelele lui Saturn, folosire blending pentru a le face transparente
 // sa se vada orbita planetelor (cercuri in planul xy)
-// fundal cu stele pentru a da impresia de spatiu infinit + LUMINA DE LA STELE; instantiated rendering pentru stele
 // !! complex: gravitatie, miscarea planetelor nu este "hardcoded", ci rezultatul fortei de gravitatie
 // atmosfera pamantului (efect de glow) (atmospheric scattering)
 // efect de lens flare pentru soare
@@ -15,6 +13,8 @@
 // !! complex: sistem de particule (comete, explozii pe soare)
 // post processing (bloom, motion blur)
 
+
+//Sursa tutorial skybox: https://learnopengl.com/Advanced-OpenGL/Cubemaps
 
 
 #include <windows.h>        //	Utilizarea functiilor de sistem Windows (crearea de ferite, manipularea fisierelor si directoarelor);
@@ -30,6 +30,12 @@
 #include "glm/gtc/type_ptr.hpp"
 #include <stack>
 #include "SOIL.h"
+#include "glm/gtc/quaternion.hpp" 
+#include "glm/gtx/quaternion.hpp"
+#include <vector>
+#include <string>
+#include <iostream>
+#include <direct.h> // Pentru _getcwd
 
 
 GLuint
@@ -44,8 +50,9 @@ GLuint
 	textureLocation, // Locatia uniformei "myTexture"
 	textureEarthId,
 	textureMoonId,
-	lightPosLocation
-	;
+	lightPosLocation,
+    OrbitVaoId, OrbitVboId // Adaugat VAO/VBO pentru orbita
+;
 
 float PI = 3.141592;
 
@@ -58,7 +65,7 @@ float radius = 50.0f;
 
 //	Dimensiunile ferestrei de afisare;
 GLfloat
-winWidth = 1400, winHeight = 600;
+	winWidth = 1400, winHeight = 600;
 
 //	Variabila ce determina schimbarea culorii pixelilor in shader;
 int codCol;
@@ -66,10 +73,18 @@ int codCol;
 // Variabila pentru timpul scurs
 float timeElapsed;
 
+// Variabila pentru a controla vizibilitatea orbitelor
+bool showOrbits = true;
+
 //	Elemente pentru matricea de vizualizare;
-float obsX = 0.0, obsY = 0.0, obsZ = 3000.f, // distanta marita pentru a vedea tot sistemul
-refX = 0.0f, refY = 0.0f, refZ = -100.f,
-vX = 0.0;
+float dist = 3000.0f;
+float alpha = 0.0f;
+float beta = 0.0f;
+float incrAlpha1 = 0.01f;
+float incrAlpha2 = 0.01f;
+// Punctul de referinta
+float refX = 0.0f, refY = 0.0f, refZ = 0.0f;
+
 //	Elemente pentru matricea de proiectie;
 float xMin = -700.f, xMax = 700.f, yMin = -300.f, yMax = 300.f,
 zNear = 100.f, zFar = 5000.f, // ZFar marit
@@ -77,44 +92,133 @@ width = 1400.f, height = 600.f, fov = 90.f * PI / 180;
 
 //	Vectori pentru matricea de vizualizare;
 glm::vec3
-obs, pctRef, vert;
+	obs, pctRef, vert;
 
 //	Variabile catre matricile de transformare;
 glm::mat4
-view, projection,
-translateSystem,
-rotateSun, scaleSun,
-scalePlanet, rotatePlanetAxis, rotatePlanet, translatePlanet,
-scaleSat, rotateSat, translateSat,
-scaleMercury, rotateMercury, translateMercury,
-scaleVenus, rotateVenus, translateVenus,
-scaleMars, rotateMars, translateMars,
-scaleJupiter, rotateJupiter, translateJupiter,
-scaleSaturn, rotateSaturn, translateSaturn,
-scaleUranus, rotateUranus, translateUranus,
-scaleNeptune, rotateNeptune, translateNeptune,
-scalePluto, rotatePluto, translatePluto;
+	view, projection,
+	translateSystem,
+	rotateSun, scaleSun,
+	scalePlanet, rotatePlanetAxis, rotatePlanet, translatePlanet,
+	scaleSat, rotateSat, translateSat,
+	scaleMercury, rotateMercury, translateMercury,
+	scaleVenus, rotateVenus, translateVenus,
+	scaleMars, rotateMars, translateMars,
+	scaleJupiter, rotateJupiter, translateJupiter,
+	scaleSaturn, rotateSaturn, translateSaturn,
+	scaleUranus, rotateUranus, translateUranus,
+	scaleNeptune, rotateNeptune, translateNeptune,
+	scalePluto, rotatePluto, translatePluto;
 
 // Stiva de matrice - inglobeaza matricea de modelare si cea de vizualizare
 std::stack<glm::mat4> mvStack;
 
-// TODO de adaugat functii suplimentare pentru controlul camerei
+// MODIFICARE: Variabile pentru vizualizare cu cuaternioni
+// Conform cursului, cuaternionul va stoca orientarea camerei.
+glm::quat viewQuaternion = glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // Identitate: s=1, v=(0,0,0)
+
+
+// Skybox
+GLuint skyboxVAO, skyboxVBO, skyboxTexture;
+GLuint skyboxProgram;
+
+// Vertics pentru Skybox (cub de 1x1x1 centric)
+float skyboxVertices[] = {
+    // positions          
+    -1.0f,  1.0f, -1.0f,
+    -1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+
+    -1.0f, -1.0f,  1.0f,
+    -1.0f, -1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f,  1.0f,
+    -1.0f, -1.0f,  1.0f,
+
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+
+    -1.0f, -1.0f,  1.0f,
+    -1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f, -1.0f,  1.0f,
+    -1.0f, -1.0f,  1.0f,
+
+    -1.0f,  1.0f, -1.0f,
+     1.0f,  1.0f, -1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f, -1.0f,
+
+    -1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f,  1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f,  1.0f,
+     1.0f, -1.0f,  1.0f
+};
+
+
+void InitSkybox()
+{
+	// Shaders
+	skyboxProgram = LoadShaders("skybox.vert", "skybox.frag");
+
+	// VAO/VBO
+	glGenVertexArrays(1, &skyboxVAO);
+	glGenBuffers(1, &skyboxVBO);
+	glBindVertexArray(skyboxVAO);
+	glBindBuffer(GL_ARRAY_BUFFER, skyboxVBO);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(skyboxVertices), &skyboxVertices, GL_STATIC_DRAW);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+
+}
+
+// Functie pentru generarea gemetriei orbitei (cerc)
+void CreateOrbitVBO(void)
+{
+    // Generam un cerc unitar in planul XZ
+    glm::vec4 OrbitVertices[360];
+    for (int i = 0; i < 360; i++)
+    {
+        float angle = (float)i * PI * 2.0f / 360.0f;
+        OrbitVertices[i] = glm::vec4(cos(angle), 0.0f, sin(angle), 1.0f);
+    }
+
+    glGenVertexArrays(1, &OrbitVaoId);
+    glBindVertexArray(OrbitVaoId);
+
+    glGenBuffers(1, &OrbitVboId);
+    glBindBuffer(GL_ARRAY_BUFFER, OrbitVboId);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(OrbitVertices), OrbitVertices, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, (GLvoid*)0);
+}
+
 void ProcessNormalKeys(unsigned char key, int x, int y)
 {
-	switch (key)
-	{
-	case 'l':			//	Apasarea tastelor `l` si `r` modifica pozitia verticalei in planul de vizualizare;
-		vX += 0.1;
-		break;
-	case 'r':
-		vX -= 0.1;
-		break;
-	case '+':			//	Apasarea tastelor `+` si `-` schimba pozitia observatorului (se departeaza / aproprie);
-		obsZ += 10;
+	switch (key) {
+	case '+':
+		dist -= 5.0;	//	Apasarea tastelor `+` si `-` schimba pozitia observatorului (se apropie / departeaza);
 		break;
 	case '-':
-		obsZ -= 10;
+		dist += 5.0;
 		break;
+    case ' ':
+        showOrbits = !showOrbits;
+        break;
 	}
 	if (key == 27)
 		exit(0);
@@ -122,23 +226,52 @@ void ProcessNormalKeys(unsigned char key, int x, int y)
 
 void ProcessSpecialKeys(int key, int xx, int yy)
 {
-	switch (key)				//	Procesarea tastelor 'LEFT', 'RIGHT', 'UP', 'DOWN';
-	{							//	duce la deplasarea observatorului pe axele Ox si Oy;
+	// Definim unghiul de rotatie incremental (theta)
+	float theta = 0.05f;
+
+	// Elemente pentru constructia cuaternionului de rotatie q = (s, v)
+	// Conform slide 49: s = cos(theta/2), v = sin(theta/2) * u
+	float s = cos(theta / 2.0f);
+	float sin_val = sin(theta / 2.0f);
+
+	glm::quat qRotate;
+
+	switch (key)
+	{
 	case GLUT_KEY_LEFT:
-		obsX -= 20;
+		// Rotatie in jurul axei Y (0, 1, 0) - Stanga
+		// u = (0, 1, 0)
+		qRotate = glm::quat(s, 0.0f * sin_val, 1.0f * sin_val, 0.0f * sin_val);
+		// Actualizam cuaternionul camerei prin inmultire
+		viewQuaternion = qRotate * viewQuaternion;
 		break;
+
 	case GLUT_KEY_RIGHT:
-		obsX += 20;
+		// Rotatie in jurul axei Y (0, 1, 0) - Dreapta (theta negativ)
+		s = cos(-theta / 2.0f);
+		sin_val = sin(-theta / 2.0f);
+		qRotate = glm::quat(s, 0.0f * sin_val, 1.0f * sin_val, 0.0f * sin_val);
+		viewQuaternion = qRotate * viewQuaternion;
 		break;
+
 	case GLUT_KEY_UP:
-		obsY += 20;
+		// Rotatie in jurul axei X locale (1, 0, 0) - Sus
+		// u = (1, 0, 0)
+		qRotate = glm::quat(s, 1.0f * sin_val, 0.0f * sin_val, 0.0f * sin_val);
+		// Inmultim la dreapta pentru rotatie locala sau stanga pentru globala.
+		// Pentru "orbitare" in jurul axei locale X:
+		viewQuaternion = viewQuaternion * qRotate;
 		break;
+
 	case GLUT_KEY_DOWN:
-		obsY -= 20;
+		// Rotatie in jurul axei X locale (1, 0, 0) - Jos (theta negativ)
+		s = cos(-theta / 2.0f);
+		sin_val = sin(-theta / 2.0f);
+		qRotate = glm::quat(s, 1.0f * sin_val, 0.0f * sin_val, 0.0f * sin_val);
+		viewQuaternion = viewQuaternion * qRotate;
 		break;
 	}
 }
-
 //texturare Luna + Pamant
 GLuint LoadTexture(const char* imagePath)
 {
@@ -163,8 +296,8 @@ GLuint LoadTexture(const char* imagePath)
 		SOIL_free_image_data(image);
 	}
 	else
-		printf("Eroare la incarcarea texturii: %s\n", imagePath); //?
-	
+		printf("Eroare la incarcarea texturii: %s\n", imagePath); //?/
+
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	return textureId;
@@ -203,9 +336,9 @@ void CreateVBO(void)
 			Vertices[index] = glm::vec4(x_vf, y_vf, z_vf, 1.0);
 			// Culoare variabila per varf (pentru cerinta ii)
 			Colors[index] = glm::vec3(0.5f + 0.5 * sinf(u), 0.5f + 0.5 * cosf(v), 0.5f + 0.5 * sinf(u + v));
-			
+
 			// calcul normale
-			
+
 			Normals[index] = glm::normalize(glm::vec3(x_vf, y_vf, z_vf));
 			// Calcul coordonate texturare (s, t) intre 0 si 1
 			// Mapam paralele si meridianele pe patratul [0,1]x[0,1]
@@ -287,10 +420,12 @@ void DestroyVBO(void)
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glDeleteBuffers(1, &VboId);
 	glDeleteBuffers(1, &EboId);
+    glDeleteBuffers(1, &OrbitVboId); // Stergem si bufferul orbitei
 
 	//  Eliberaea obiectelor de tip VAO;
 	glBindVertexArray(0);
 	glDeleteVertexArrays(1, &VaoId);
+    glDeleteVertexArrays(1, &OrbitVaoId); // Stergem si VAO orbitei
 }
 
 //  Functia de eliberare a resurselor alocate de program;
@@ -321,37 +456,126 @@ void Initialize(void)
 
 	textureEarthId = LoadTexture("earth_map.jpg"); // Placeholder
 	textureMoonId = LoadTexture("moon_map.jpg");   // Placeholder
-	
+
+    // Initializeaza Skybox (VAO, Shaders, Texturi)
+    InitSkybox();
+    
+    // Initializeaza Orbita
+    CreateOrbitVBO();
 
 	//	Realizarea proiectiei - pot fi utilizate si alte variante;
 	/* projection = glm::ortho(xMin, xMax, yMin, yMax, zNear, zFar);*/
 		/*projection = glm::frustum(xMin, xMax, yMin, yMax, zNear, zFar);*/ //foarte departe
 	/*projection = glm::perspective(fov, GLfloat(width) / GLfloat(height), zNear, zFar);*/ //default
-	 projection = glm::infinitePerspective(fov, GLfloat(width) / GLfloat(height), zNear); //cute
+	projection = glm::infinitePerspective(fov, GLfloat(width) / GLfloat(height), zNear); //cute
 	glUniformMatrix4fv(projLocation, 1, GL_FALSE, &projection[0][0]);
 }
 
 //	Functia de desenare a graficii pe ecran;
 void RenderFunction(void)
 {
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);		//  Se curata ecranul OpenGL pentru a fi desenat noul continut (bufferul de culoare & adancime);
-	glEnable(GL_DEPTH_TEST);                                //  Activarea testului de adancime
-
-	// Variabila care indica timpul scurs de la initializare
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glEnable(GL_DEPTH_TEST);
 	timeElapsed = glutGet(GLUT_ELAPSED_TIME);
 
-	//	Matricea de vizualizare - actualizare
-	//	Pozitia observatorului;
-	obs = glm::vec3(obsX, obsY, obsZ);
-	//	Pozitia punctului de referinta;
-	refX = obsX; refY = obsY;
+	// --- IMPLEMENTARE VIZUALIZARE CU CUATERNIONI (CURS 12) ---
+
+	// 1. Extragem componentele cuaternionului q = s + ai + bj + ck
+	// In GLM: w=s, x=a, y=b, z=c
+	float s = viewQuaternion.w;
+	float a = viewQuaternion.x;
+	float b = viewQuaternion.y;
+	float c = viewQuaternion.z;
+
+	// 2. Construim Matricea de Rotatie 3x3 conform Slide 51 
+	// Atentie: GLM foloseste column-major order (col, row), dar formula matematica e standard.
+	// Slide 51:
+	// Row 1: s^2+a^2-b^2-c^2, 2ab-2sc,       2ac+2sb
+	// Row 2: 2ab+2sc,       s^2-a^2+b^2-c^2, 2bc-2sa
+	// Row 3: 2ac-2sb,       2bc+2sa,         s^2-a^2-b^2+c^2
+
+	glm::mat4 rotationMat(1.0f); // Initializare identitate
+
+	// Coloana 0 (vectorul Right transformat)
+	rotationMat[0][0] = s * s + a * a - b * b - c * c;
+	rotationMat[0][1] = 2 * a * b + 2 * s * c;
+	rotationMat[0][2] = 2 * a * c - 2 * s * b;
+
+	// Coloana 1 (vectorul Up transformat)
+	rotationMat[1][0] = 2 * a * b - 2 * s * c;
+	rotationMat[1][1] = s * s - a * a + b * b - c * c;
+	rotationMat[1][2] = 2 * b * c + 2 * s * a;
+
+	// Coloana 2 (vectorul Forward transformat)
+	rotationMat[2][0] = 2 * a * c + 2 * s * b;
+	rotationMat[2][1] = 2 * b * c - 2 * s * a;
+	rotationMat[2][2] = s * s - a * a - b * b + c * c;
+
+	// 3. Calculam pozitia observatorului
+	// Vectorul initial al camerei (fara rotatie) este pe axa Z la distanta 'dist'
+	glm::vec4 initialCamPos = glm::vec4(0.0f, 0.0f, dist, 1.0f);
+
+	// Rotim pozitia folosind matricea derivata din cuaternion
+	glm::vec4 rotatedCamPos = rotationMat * initialCamPos;
+
+	// Setam pozitia observatorului
+	obs.x = refX + rotatedCamPos.x;
+	obs.y = refY + rotatedCamPos.y;
+	obs.z = refZ + rotatedCamPos.z;
+
+	// Punctul de referinta ramane neschimbat
 	pctRef = glm::vec3(refX, refY, refZ);
-	//	Verticala din planul de vizualizare; 
-	vert = glm::vec3(vX, 1.0f, 0.0f);
+
+	// Verticala trebuie si ea rotita pentru ca camera sa nu se rastoarne
+	// Vectorul vertical initial este (0, 1, 0)
+	glm::vec4 initialUp = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+	glm::vec4 rotatedUp = rotationMat * initialUp;
+	vert = glm::vec3(rotatedUp);
+
 	view = glm::lookAt(obs, pctRef, vert);
 
-	// Trimitem pozitia Soarelui catre shader
-	// Soarele este in (0,0,0) in World Space. Transformam in View Space.
+    // --- DESENARE SKYBOX ---
+    // Se deseneaza PRIMUL sau ULTIMUL. Desenam ULTIMUL pentru optimizare (folosind adancimea maxima)
+    // Dar schimbam functia de adancime la GL_LEQUAL
+		// --- DESENARE SKYBOX ---
+	// Se deseneaza PRIMUL sau ULTIMUL. Desenam ULTIMUL pentru optimizare 
+	glDepthFunc(GL_LEQUAL);
+	glUseProgram(skyboxProgram);
+
+	// Eliminam translatia din matricea de vizualizare pentru Skybox
+	glm::mat4 viewSkybox = glm::mat4(glm::mat3(view));
+
+	glUniformMatrix4fv(glGetUniformLocation(skyboxProgram, "view"), 1, GL_FALSE, glm::value_ptr(viewSkybox));
+	glUniformMatrix4fv(glGetUniformLocation(skyboxProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+
+	glBindVertexArray(skyboxVAO);
+
+	// TEXTURE BINDING REMOVED
+	// glActiveTexture(GL_TEXTURE0);
+	// glBindTexture(GL_TEXTURE_CUBE_MAP, skyboxTexture);
+	// glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+
+	// Masca de adancime oprita
+	glDepthMask(GL_FALSE);
+
+	// Dezactivam face culling pentru interior
+	glDisable(GL_CULL_FACE);
+
+	glDrawArrays(GL_TRIANGLES, 0, 36);
+
+	// Reactivam setarile implicite
+	glEnable(GL_CULL_FACE);
+	glDepthMask(GL_TRUE);
+	// glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS); // Removed
+	glBindVertexArray(0);
+
+	// Revenim la setarile normale
+	glDepthFunc(GL_LESS);
+	glUseProgram(ProgramId);
+
+    // Re-bind the VAO for the solar system objects (sphere geometry)
+    // This restores the EBO binding required for glDrawElements
+    glBindVertexArray(VaoId);
 
 	glm::vec4 lightPosView = view * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 	glUniform3f(lightPosLocation, lightPosView.x, lightPosView.y, lightPosView.z);
@@ -364,7 +588,7 @@ void RenderFunction(void)
 	rotateSun = glm::mat4(1.0f);
 	scaleSun = glm::scale(glm::mat4(1.0f), glm::vec3(4.0f, 4.0f, 4.0f));
 	
-	
+
 	// Pamantul se obtine scaland sfera initiala
 	scalePlanet = glm::scale(glm::mat4(1.0f), glm::vec3(0.5, 0.5, 0.5));
 	// se roteste in jurul propriei axe
@@ -419,7 +643,6 @@ void RenderFunction(void)
 	translateSat = glm::translate(glm::mat4(1.0f), glm::vec3(80.0, 0.0, 0.0));
 	scaleSat = glm::scale(glm::mat4(1.0f), glm::vec3(0.2, 0.2, 0.2));
 
-
 	// Desenarea primitivelor + manevrarea stivei de matrice
 	// 
 	// Matricea de vizualizare este adaugata in varful stivei de matrice
@@ -441,6 +664,39 @@ void RenderFunction(void)
 
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
 	mvStack.pop();
+
+    // --- DESENARE ORBITE PLANETE ---
+    if (showOrbits)
+    {
+        glUniform1i(objectTypeLocation, 12); // Tip pentru orbită (fara lumina)
+        glBindVertexArray(OrbitVaoId);
+        glLineWidth(1.0f); 
+        
+        // Lista razelor orbitelor planetelor
+        std::vector<float> orbitRadii = {
+            300.0f,  // Mercur
+            450.0f,  // Venus
+            600.0f,  // Pamant
+            750.0f,  // Marte
+            1100.0f, // Jupiter
+            1400.0f, // Saturn
+            1700.0f, // Uranus
+            2000.0f, // Neptun
+            2200.0f  // Pluto
+        };
+        
+        for (float r : orbitRadii) {
+            mvStack.push(mvStack.top());
+            mvStack.top() *= glm::scale(glm::mat4(1.0f), glm::vec3(r, 1.0f, r));
+            glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
+            glDrawArrays(GL_LINE_LOOP, 0, 360);
+            mvStack.pop();
+        }
+        
+        // Revenim la VAO-ul sferei pentru desenarea planetelor
+        glBindVertexArray(VaoId);
+    }
+    // --------------------------------
 
 	// Mercur
 	mvStack.push(mvStack.top());
@@ -519,7 +775,7 @@ void RenderFunction(void)
 	mvStack.top() *= scalePluto;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
 	glUniform1i(objectTypeLocation, 11); // 11 pentru Pluto
-	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
+ glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
 	mvStack.pop();
 
 	// Pamant
@@ -564,6 +820,14 @@ void RenderFunction(void)
 //	Punctul de intrare in program, se ruleaza rutina OpenGL;
 int main(int argc, char* argv[])
 {
+    // Afisare director curent de lucru pentru diagnosticare
+    char cwd[1024];
+    if (_getcwd(cwd, sizeof(cwd)) != NULL) {
+        printf("Directorul curent de lucru este: %s\n", cwd);
+    } else {
+        perror("getcwd() error");
+    }
+
 	//  Se initializeaza GLUT si contextul OpenGL si se configureaza fereastra si modul de afisare;
 
 	glutInit(&argc, argv);
