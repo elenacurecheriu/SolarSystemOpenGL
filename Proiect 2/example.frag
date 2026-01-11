@@ -45,6 +45,23 @@ void main()
             // Curs Pag 3: Alpha < 1.0 inseamna transparent
             baseColor = vec4(0.8, 0.7, 0.5, 0.55); 
         }
+        else if (objectType == 14) // Asteroid
+        {
+            baseColor = vec4(ex_Color, 1.0);
+        }
+        else if (objectType == 20) // Atmosfera Pamant
+        {
+             vec3 viewDir = normalize(-ex_FragPos);
+             vec3 normal = normalize(ex_Normal);
+             float dotProduct = max(dot(viewDir, normal), 0.0);
+             // Efect Fresnel pentru glow la margine
+             // Alpha este mic in centru (dot ~ 1) si mare la margine (dot ~ 0)
+             // Inversam: 1 - dot
+             // Crestem puterea la 4.0 pentru un gradient mai fin spre margine
+             float alpha = pow(1.0 - dotProduct, 4.0); 
+             // Culoare albastra pentru atmosfera, cu alpha redus global (0.65)
+             baseColor = vec4(0.0, 0.5, 1.0, alpha * 0.65);
+        }
         else
         {
             baseColor = vec4(ex_Color, 1.0);
