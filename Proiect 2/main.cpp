@@ -1,11 +1,4 @@
-﻿//   - transformarile de modelare si cea de vizualizare sunt inglobate intr-o singura matrice;
-//	 - folosirea stivelor de matrice;
-//   - generare procedurala sfera;
-
-// TODO !! instanciated rendering pentru asteroizi (centura de asteroizi intre Marte si Jupiter?) 
-// adaugare in shader texturare pentru toate planetele
-// !!complex?: inelele lui Saturn, folosire blending pentru a le face transparente
-// sa se vada orbita planetelor (cercuri in planul xy)
+﻿// TODO !! instanciated rendering pentru asteroizi (centura de asteroizi intre Marte si Jupiter?) 
 // !! complex: gravitatie, miscarea planetelor nu este "hardcoded", ci rezultatul fortei de gravitatie
 // atmosfera pamantului (efect de glow) (atmospheric scattering)
 // efect de lens flare pentru soare
@@ -50,8 +43,17 @@ GLuint
 	textureLocation, // Locatia uniformei "myTexture"
 	textureEarthId,
 	textureMoonId,
+    textureSunId,
+    textureMercuryId,
+    textureVenusId,
+    textureMarsId,
+    textureJupiterId,
+    textureSaturnId,
+    textureUranusId,
+    textureNeptuneId,
 	lightPosLocation,
-    OrbitVaoId, OrbitVboId // Adaugat VAO/VBO pentru orbita
+    OrbitVaoId, OrbitVboId,
+	RingVaoId, RingVboId
 ;
 
 float PI = 3.141592;
@@ -107,8 +109,8 @@ glm::mat4
 	scaleJupiter, rotateJupiter, translateJupiter,
 	scaleSaturn, rotateSaturn, translateSaturn,
 	scaleUranus, rotateUranus, translateUranus,
-	scaleNeptune, rotateNeptune, translateNeptune,
-	scalePluto, rotatePluto, translatePluto;
+	scaleNeptune, rotateNeptune, translateNeptune;
+    // Removed Pluto variables
 
 // Stiva de matrice - inglobeaza matricea de modelare si cea de vizualizare
 std::stack<glm::mat4> mvStack;
@@ -402,6 +404,67 @@ void CreateVBO(void)
 	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*)(sizeof(Vertices) + sizeof(Colors) + sizeof(TexCoords)));
 }
 
+void CreateRingVBO(void)
+{
+	// Structura vertexului trebuie sa coincida cu layout-ul din shader:
+	// 0: Pos(4), 1: Color(3), 2: Tex(2), 3: Norm(3)
+	struct VertexFormat {
+		glm::vec4 position;
+		glm::vec3 color;
+		glm::vec2 texCoord;
+		glm::vec3 normal;
+	};
+
+	std::vector<VertexFormat> vertices;
+	int segments = 72; // Numar de segmente pentru cerc
+	float innerRadius = 1.3f; // Relativ la raza planetei
+	float outerRadius = 2.2f;
+
+	for (int i = 0; i <= segments; i++) {
+		float angle = (float)i * 2.0f * PI / segments;
+		float c = cos(angle);
+		float s = sin(angle);
+
+		// Pentru fiecare pas, adaugam 2 vertecsi: unul interior, unul exterior
+		// Vertex Interior
+		VertexFormat v1;
+		v1.position = glm::vec4(innerRadius * c, 0.0f, innerRadius * s, 1.0f);
+		v1.color = glm::vec3(0.7f, 0.6f, 0.5f); // Culoare bej pentru inel
+		v1.texCoord = glm::vec2(0.0f, (float)i / segments);
+		v1.normal = glm::vec3(0.0f, 1.0f, 0.0f); // Normala in sus
+		vertices.push_back(v1);
+
+		// Vertex Exterior
+		VertexFormat v2;
+		v2.position = glm::vec4(outerRadius * c, 0.0f, outerRadius * s, 1.0f);
+		v2.color = glm::vec3(0.7f, 0.6f, 0.5f);
+		v2.texCoord = glm::vec2(1.0f, (float)i / segments);
+		v2.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+		vertices.push_back(v2);
+	}
+
+	glGenVertexArrays(1, &RingVaoId);
+	glBindVertexArray(RingVaoId);
+
+	glGenBuffers(1, &RingVboId);
+	glBindBuffer(GL_ARRAY_BUFFER, RingVboId);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(VertexFormat), vertices.data(), GL_STATIC_DRAW);
+
+	// Setam atributele (layout-ul este identic cu cel din example.vert)
+	// Pos
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(VertexFormat), (void*)0);
+	// Color
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(VertexFormat), (void*)(sizeof(glm::vec4)));
+	// Tex
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(VertexFormat), (void*)(sizeof(glm::vec4) + sizeof(glm::vec3)));
+	// Normal
+	glEnableVertexAttribArray(3);
+	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(VertexFormat), (void*)(sizeof(glm::vec4) + sizeof(glm::vec3) + sizeof(glm::vec2)));
+}
+
 //  Elimina obiectele de tip shader dupa rulare;
 void DestroyShaders(void)
 {
@@ -454,14 +517,23 @@ void Initialize(void)
 	// Locatia pozitiei sursei de lumina
 	lightPosLocation = glGetUniformLocation(ProgramId, "lightPos");
 
-	textureEarthId = LoadTexture("earth_map.jpg"); // Placeholder
-	textureMoonId = LoadTexture("moon_map.jpg");   // Placeholder
+	textureEarthId = LoadTexture("earth_map.jpg");
+	textureMoonId = LoadTexture("moon_map.jpg");  
+    textureSunId = LoadTexture("sun.jpg");
+    textureMercuryId = LoadTexture("mercury.jpg");
+    textureVenusId = LoadTexture("venus.jpg");
+    textureMarsId = LoadTexture("mars.jpg");
+    textureJupiterId = LoadTexture("jupiter.jpg");
+    textureSaturnId = LoadTexture("saturn.jpg");
+    textureUranusId = LoadTexture("uranus.jpg");
+    textureNeptuneId = LoadTexture("neptune.jpg");
 
     // Initializeaza Skybox (VAO, Shaders, Texturi)
     InitSkybox();
     
     // Initializeaza Orbita
     CreateOrbitVBO();
+	CreateRingVBO();
 
 	//	Realizarea proiectiei - pot fi utilizate si alte variante;
 	/* projection = glm::ortho(xMin, xMax, yMin, yMax, zNear, zFar);*/
@@ -633,10 +705,7 @@ void RenderFunction(void)
 	rotateNeptune = glm::rotate(glm::mat4(1.0f), (float)0.00008 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
 	translateNeptune = glm::translate(glm::mat4(1.0f), glm::vec3(2000.0, 0.0, 0.0));
 
-	// Pluto
-	scalePluto = glm::scale(glm::mat4(1.0f), glm::vec3(0.15f, 0.15f, 0.15f));
-	rotatePluto = glm::rotate(glm::mat4(1.0f), (float)0.00005 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
-	translatePluto = glm::translate(glm::mat4(1.0f), glm::vec3(2200.0, 0.0, 0.0));
+	// Link catre Pluto eliminat de aici
 
 	// Luna: rotatie in jurul planetei, translatie mica, scalare mare
 	rotateSat = glm::rotate(glm::mat4(1.0f), (float)0.003 * timeElapsed, glm::vec3(0.0, 1.0, 0.0));
@@ -655,12 +724,16 @@ void RenderFunction(void)
 
 	// Soare
 	mvStack.top() *= rotateSun;
+    // Rotatie 90 grade pe X pentru orientare corecta textura
+    mvStack.top() *= glm::rotate(glm::mat4(1.0f), PI / 2, glm::vec3(1.0f, 0.0f, 0.0f));
 	mvStack.top() *= scaleSun;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
 	glUniform1i(objectTypeLocation, 1);
 
-	// Dezlegam orice textura pentru siguranta (sau folosim textura 0)
-	glBindTexture(GL_TEXTURE_2D, 0);
+    // Textura Soare
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, textureSunId);
+	glUniform1i(textureLocation, 0);
 
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
 	mvStack.pop();
@@ -681,8 +754,8 @@ void RenderFunction(void)
             1100.0f, // Jupiter
             1400.0f, // Saturn
             1700.0f, // Uranus
-            2000.0f, // Neptun
-            2200.0f  // Pluto
+            2000.0f  // Neptun
+            // Pluto removed
         };
         
         for (float r : orbitRadii) {
@@ -702,9 +775,17 @@ void RenderFunction(void)
 	mvStack.push(mvStack.top());
 	mvStack.top() *= rotateMercury;
 	mvStack.top() *= translateMercury;
+    // Rotatie 90 grade pe X pentru orientare corecta textura
+    mvStack.top() *= glm::rotate(glm::mat4(1.0f), PI / 2, glm::vec3(1.0f, 0.0f, 0.0f));
 	mvStack.top() *= scaleMercury;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
 	glUniform1i(objectTypeLocation, 4); // 4 pentru Mercur
+    
+    // Textura Mercur
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureMercuryId);
+    glUniform1i(textureLocation, 0);
+
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
 	mvStack.pop();
 
@@ -712,9 +793,17 @@ void RenderFunction(void)
 	mvStack.push(mvStack.top());
 	mvStack.top() *= rotateVenus;
 	mvStack.top() *= translateVenus;
+    // Rotatie 90 grade pe X pentru orientare corecta textura
+    mvStack.top() *= glm::rotate(glm::mat4(1.0f), PI / 2, glm::vec3(1.0f, 0.0f, 0.0f));
 	mvStack.top() *= scaleVenus;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
 	glUniform1i(objectTypeLocation, 5); // 5 pentru Venus
+
+    // Textura Venus
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureVenusId);
+    glUniform1i(textureLocation, 0);
+
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
 	mvStack.pop();
 
@@ -722,9 +811,17 @@ void RenderFunction(void)
 	mvStack.push(mvStack.top());
 	mvStack.top() *= rotateMars;
 	mvStack.top() *= translateMars;
+    // Rotatie 90 grade pe X pentru orientare corecta textura
+    mvStack.top() *= glm::rotate(glm::mat4(1.0f), PI / 2, glm::vec3(1.0f, 0.0f, 0.0f));
 	mvStack.top() *= scaleMars;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
 	glUniform1i(objectTypeLocation, 6); // 6 pentru Marte
+
+    // Textura Marte
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureMarsId);
+    glUniform1i(textureLocation, 0);
+
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
 	mvStack.pop();
 
@@ -732,9 +829,17 @@ void RenderFunction(void)
 	mvStack.push(mvStack.top());
 	mvStack.top() *= rotateJupiter;
 	mvStack.top() *= translateJupiter;
+    // Rotatie 90 grade pe X pentru orientare corecta textura
+    mvStack.top() *= glm::rotate(glm::mat4(1.0f), PI / 2, glm::vec3(1.0f, 0.0f, 0.0f));
 	mvStack.top() *= scaleJupiter;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
 	glUniform1i(objectTypeLocation, 7); // 7 pentru Jupiter
+
+    // Textura Jupiter
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureJupiterId);
+    glUniform1i(textureLocation, 0);
+
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
 	mvStack.pop();
 
@@ -742,19 +847,69 @@ void RenderFunction(void)
 	mvStack.push(mvStack.top());
 	mvStack.top() *= rotateSaturn;
 	mvStack.top() *= translateSaturn;
+
+	// Salvam matricea curenta (centrul lui Saturn) pentru a desena inelul tot aici
+	glm::mat4 saturnCenterMatrix = mvStack.top();
+
+	// 1. Desenam Planeta Saturn (Opaca)
+    // Rotatie 90 grade pe X pentru orientare corecta textura (aplicata doar la planeta, nu si la save-ul pentru inel)
+    // Atentie: save-ul s-a facut inainte. Acum rotim MV-ul curent.
+    mvStack.top() *= glm::rotate(glm::mat4(1.0f), PI / 2, glm::vec3(1.0f, 0.0f, 0.0f));
 	mvStack.top() *= scaleSaturn;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
 	glUniform1i(objectTypeLocation, 8); // 8 pentru Saturn
+    
+    // Textura Saturn
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureSaturnId);
+    glUniform1i(textureLocation, 0);
+
+	glBindVertexArray(VaoId); // Asiguram ca e VAO-ul sferei
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
+
+	// 2. Desenam Inelele (Transparente) - Implementare Curs Pag 35
+	glEnable(GL_BLEND); // Activam blending
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); // Formula standard
+	glDepthMask(GL_FALSE); // Oprim scrierea in Depth Buffer (recomandat pt transparente)
+    glDisable(GL_CULL_FACE); // Dezactivam culling pentru a vedea inelele din ambele parti
+
+	mvStack.top() = saturnCenterMatrix; // Revenim la centrul lui Saturn
+
+	// Scalam si rotim inelul
+	// Il facem plat pe Y (desi geometria e deja plata, o putem mari)
+	// Rotim putin inelul sa se vada frumos
+	mvStack.top() *= glm::rotate(glm::mat4(1.0f), glm::radians(30.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	mvStack.top() *= glm::scale(glm::mat4(1.0f), glm::vec3(50.0f, 50.0f, 50.0f)); // Raza inelului ajustata la dimensiunea planetei (r=50)
+
+	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
+	glUniform1i(objectTypeLocation, 13); // COD NOU PENTRU INEL
+
+	glBindVertexArray(RingVaoId);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 146); // 72 segmente * 2 vertecsi + 2 de inchidere
+
+	// Restauram starile OpenGL
+	glDepthMask(GL_TRUE);
+	glDisable(GL_BLEND);
+    glEnable(GL_CULL_FACE); // Reactivam culling
+	glBindVertexArray(VaoId); // Revenim la sfera pentru urmatoarele planete
+
 	mvStack.pop();
 
 	// Uranus
 	mvStack.push(mvStack.top());
 	mvStack.top() *= rotateUranus;
 	mvStack.top() *= translateUranus;
+    // Rotatie 90 grade pe X pentru orientare corecta textura
+    mvStack.top() *= glm::rotate(glm::mat4(1.0f), PI / 2, glm::vec3(1.0f, 0.0f, 0.0f));
 	mvStack.top() *= scaleUranus;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
 	glUniform1i(objectTypeLocation, 9); // 9 pentru Uranus
+
+    // Textura Uranus
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureUranusId);
+    glUniform1i(textureLocation, 0);
+
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
 	mvStack.pop();
 
@@ -762,21 +917,20 @@ void RenderFunction(void)
 	mvStack.push(mvStack.top());
 	mvStack.top() *= rotateNeptune;
 	mvStack.top() *= translateNeptune;
+    // Rotatie 90 grade pe X pentru orientare corecta textura
+    mvStack.top() *= glm::rotate(glm::mat4(1.0f), PI / 2, glm::vec3(1.0f, 0.0f, 0.0f));
 	mvStack.top() *= scaleNeptune;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
 	glUniform1i(objectTypeLocation, 10); // 10 pentru Neptun
+
+    // Textura Neptun
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureNeptuneId);
+    glUniform1i(textureLocation, 0);
+
 	glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
 	mvStack.pop();
 
-	// Pluto
-	mvStack.push(mvStack.top());
-	mvStack.top() *= rotatePluto;
-	mvStack.top() *= translatePluto;
-	mvStack.top() *= scalePluto;
-	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
-	glUniform1i(objectTypeLocation, 11); // 11 pentru Pluto
- glDrawElements(GL_QUADS, NR_MERID * NR_PARR * 4, GL_UNSIGNED_SHORT, (void*)(0));
-	mvStack.pop();
 
 	// Pamant
 	mvStack.top() *= rotatePlanet;
@@ -801,6 +955,8 @@ void RenderFunction(void)
 	// Luna
 	mvStack.top() *= rotateSat;
 	mvStack.top() *= translateSat;
+    // Rotatie 90 grade pe X pentru orientare corecta textura
+    mvStack.top() *= glm::rotate(glm::mat4(1.0f), PI / 2, glm::vec3(1.0f, 0.0f, 0.0f));
 	mvStack.top() *= scaleSat;
 	glUniformMatrix4fv(viewModelLocation, 1, GL_FALSE, glm::value_ptr(mvStack.top()));
 	glUniform1i(objectTypeLocation, 3);
@@ -834,7 +990,7 @@ int main(int argc, char* argv[])
 	glutInitDisplayMode(GLUT_RGB | GLUT_DEPTH | GLUT_DOUBLE);		//	Se folosesc 2 buffere pentru desen (unul pentru afisare si unul pentru randare => animatii cursive) si culori RGB + 1 buffer pentru adancime;
 	glutInitWindowSize(winWidth, winHeight);						//  Dimensiunea ferestrei;
 	glutInitWindowPosition(100, 100);								//  Pozitia initiala a ferestrei;
-	glutCreateWindow("Sistem Solar - Stive Matrice & Sfera Procedurala");		//	Creeaza fereastra de vizualizare, indicand numele acesteia;
+	glutCreateWindow("Proiect 2");		//	Creeaza fereastra de vizualizare, indicand numele acesteia;
 
 	//	Se initializeaza GLEW si se verifica suportul de extensii OpenGL modern disponibile pe sistemul gazda;
 	//  Trebuie initializat inainte de desenare;

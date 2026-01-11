@@ -19,49 +19,31 @@ void main()
 
     if (codCol == 0) 
     {
+        // Toate planetele (1-Soare .. 10-Neptun) folosesc acum textura
         if (objectType == 1) 
         {
-             baseColor = vec4(1.0, 0.9, 0.2, 1.0);
+             // Soarele - mai stralucitor
+             baseColor = texture(myTexture, ex_TexCoord) * 1.5;
         }
-        else if (objectType == 2 || objectType == 3) 
+        else if (objectType >= 2 && objectType <= 10) 
+        // 1-Soare, 2-Pamant, 3-Luna, 4-Mercur, 5-Venus, 6-Marte, 7-Jupiter, 8-Saturn, 9-Uranus, 10-Neptun
         {
-            baseColor = texture(myTexture, ex_TexCoord);
-        }
-        else if (objectType == 4)
-        {
-            baseColor = vec4(0.7, 0.6, 0.5, 1.0);
-        }
-        else if (objectType == 5)
-        {
-            baseColor = vec4(0.9, 0.85, 0.7, 1.0);
-        }
-        else if (objectType == 6)
-        {
-            baseColor = vec4(0.8, 0.3, 0.2, 1.0);
-        }
-        else if (objectType == 7)
-        {
-            baseColor = vec4(0.8, 0.6, 0.4, 1.0);
-        }
-        else if (objectType == 8)
-        {
-            baseColor = vec4(0.9, 0.8, 0.5, 1.0);
-        }
-        else if (objectType == 9)
-        {
-            baseColor = vec4(0.5, 0.8, 0.9, 1.0);
-        }
-        else if (objectType == 10)
-        {
-            baseColor = vec4(0.2, 0.3, 0.8, 1.0);
+             baseColor = texture(myTexture, ex_TexCoord);
         }
         else if (objectType == 11)
         {
+             // Pluto removed, keeping generic fallback or ignore
             baseColor = vec4(0.6, 0.5, 0.5, 1.0);
         }
         else if (objectType == 12) // Orbita
         {
-             baseColor = vec4(1.0, 1.0, 1.0, 1.0); // Alb
+             baseColor = vec4(1.0, 1.0, 1.0, 1.0);
+        }
+        else if (objectType == 13) // Inelele lui Saturn
+        {
+            // Culoare bej cu transparenta (Alpha = 0.6)
+            // Curs Pag 3: Alpha < 1.0 inseamna transparent
+            baseColor = vec4(0.8, 0.7, 0.5, 0.55); 
         }
         else
         {
@@ -75,16 +57,16 @@ void main()
 
     
     // Soarele emite lumina, nu are umbra
-    if (objectType == 1 || objectType == 12 || codCol != 0)
+    if (objectType == 1 || objectType == 12 || codCol != 0 || objectType == 13) 
     {
-        out_Color = baseColor;
-        return;
+        out_Color = baseColor; 
+        return; // Inelul nu primeste umbre complexe in aceasta faza
     }
 
     // implementare formule curs 10 
 
     // proprietati lumina
-    vec3 lightColor = vec3(1.0, 1.0, 1.0);
+    vec3 lightColor = vec3(2.5, 2.5, 2.5); // Increased light intensity for distant planets
     float ambientStrength = 0.15;
     float specularStrength = 0.5;
     float shininess = 32.0;
